@@ -10,12 +10,19 @@ let MESSAGE_CHANNEL = "flutter_branch_sdk/message";
 let EVENT_CHANNEL = "flutter_branch_sdk/event";
 let ERROR_CODE = "FLUTTER_BRANCH_SDK_ERROR";
 let PLUGIN_NAME = "Flutter";
-let PLUGIN_VERSION = "6.4.0"
+let COCOA_POD_NAME = "org.cocoapods.flutter-branch-sdk";
 
 public class SwiftFlutterBranchSdkPlugin: NSObject, FlutterPlugin, FlutterStreamHandler  {
     var eventSink: FlutterEventSink?
     var initialParams : [String: Any]? = nil
     var initialError : NSError? = nil
+
+    var branch : Branch?
+    var isInitialized = false
+
+    var requestMetadata : [String: String] = [:]
+    var facebookParameters : [String: String] = [:]
+    var snapParameters : [String: String] = [:]
     
     //---------------------------------------------------------------------------------------------
     // Plugin registry
@@ -31,57 +38,21 @@ public class SwiftFlutterBranchSdkPlugin: NSObject, FlutterPlugin, FlutterStream
         registrar.addMethodCallDelegate(instance, channel: methodChannel!)
     }
     
+    func getPluginVersion() -> String {
+        var pluginVersion : String = ""
+        if let version = Bundle(identifier: COCOA_POD_NAME)?.infoDictionary?["CFBundleShortVersionString"] as? String {
+            pluginVersion = version;
+        }
+        return pluginVersion
+    }
     
     public func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [AnyHashable : Any] = [:]) -> Bool {
-        
-        
-        Branch.getInstance().registerPluginName(PLUGIN_NAME, version: PLUGIN_VERSION);
-        
-#if DEBUG
-        let enableLog = Bundle.infoPlistValue(forKey: "branch_enable_log") as? Bool ?? true
-        if enableLog {
-            Branch.getInstance().enableLogging()
-        }
-#else
-        let enableLog = Bundle.infoPlistValue(forKey: "branch_enable_log") as? Bool ?? false
-        if enableLog {
-            Branch.getInstance().enableLogging()
-        }
-#endif
-        
-        let enableAppleADS = Bundle.infoPlistValue(forKey: "branch_check_apple_ads") as? Bool ?? false
-        
-        print("Branch Check Apple ADS active: \(String(describing:enableAppleADS))");
-        
-        if enableAppleADS {
-            // This will usually add less than 1 second on first time startup.  Up to 3.5 seconds if Apple Search Ads fails to respond.
-            Branch.getInstance().delayInitToCheckForSearchAds()
-        }
-        
-        let enableFacebookAds = Bundle.infoPlistValue(forKey: "branch_enable_facebook_ads") as? Bool ?? false
-        print("Branch Check Facebook Link: \(String(describing:enableFacebookAds))");
-        
-        if enableFacebookAds {
-            //Facebook App Install Ads
-            //https://help.branch.io/using-branch/docs/facebook-app-install-ads#configure-your-app-to-read-facebook-app-install-deep-links
-            
-            let FBSDKAppLinkUtility: AnyClass? = NSClassFromString("FBSDKAppLinkUtility")
-            if let FBSDKAppLinkUtility = FBSDKAppLinkUtility {
-                Branch.getInstance().registerFacebookDeepLinkingClass(FBSDKAppLinkUtility)
-            } else {
-                NSLog("FBSDKAppLinkUtility not found but branch_enable_facebook_ads set to true. Please be sure you have integrated the Facebook SDK.")
-            }
-        }
-        
-        let checkPasteboard  = Bundle.infoPlistValue(forKey: "branch_check_pasteboard") as? Bool ?? false
-        print("Branch Clipboard Deferred Deep Linking: \(String(describing:checkPasteboard))");
-        
-        if checkPasteboard {
-            Branch.getInstance().checkPasteboardOnInstall()
-        } else if #available(iOS 15.0, *) {
+        Branch.getInstance().registerPluginName(PLUGIN_NAME, version:  getPluginVersion())
+
+        if #available(iOS 15.0, *) {
             Branch.getInstance().checkPasteboardOnInstall()
         }
-        
+
         Branch.getInstance().initSession(launchOptions: launchOptions) { (params, error) in
             if error == nil {
                 print("Branch InitSession params: \(String(describing: params as? [String: Any]))")
@@ -107,6 +78,11 @@ public class SwiftFlutterBranchSdkPlugin: NSObject, FlutterPlugin, FlutterStream
     
     public func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
         let branchHandled = Branch.getInstance().application(app, open: url, options: options)
+        return branchHandled
+    }
+    
+    public func application(_ app: UIApplication, open url: URL, sourceApplication: String, annotation: Any) -> Bool {
+        let branchHandled = Branch.getInstance().application(app, open: url, sourceApplication: sourceApplication, annotation: annotation)
         return branchHandled
     }
     
@@ -151,6 +127,9 @@ public class SwiftFlutterBranchSdkPlugin: NSObject, FlutterPlugin, FlutterStream
     // --------------------------------------------------------------------------------------------
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch (call.method) {
+        case "init":
+            setupBranch(call: call, result: result)
+            break
         case "getShortUrl":
             getShortUrl(call: call, result: result)
             break
@@ -177,7 +156,7 @@ public class SwiftFlutterBranchSdkPlugin: NSObject, FlutterPlugin, FlutterStream
             break
         case "setRequestMetadata":
             setRequestMetadata(call: call);
-            break;
+            break
         case "logout":
             logout()
             break
@@ -195,9 +174,6 @@ public class SwiftFlutterBranchSdkPlugin: NSObject, FlutterPlugin, FlutterStream
             break
         case "isUserIdentified":
             isUserIdentified(result: result)
-            break
-        case "setSKAdNetworkMaxTime" :
-            setSKAdNetworkMaxTime(call: call)
             break
         case "requestTrackingAuthorization" :
             requestTrackingAuthorization(result: result)
@@ -247,6 +223,9 @@ public class SwiftFlutterBranchSdkPlugin: NSObject, FlutterPlugin, FlutterStream
         case "addSnapPartnerParameter" :
             addSnapPartnerParameter(call: call)
             break
+        case "setDMAParamsForEEA":
+            setDMAParamsForEEA(call: call)
+            break;
         default:
             result(FlutterMethodNotImplemented)
             break
@@ -256,6 +235,47 @@ public class SwiftFlutterBranchSdkPlugin: NSObject, FlutterPlugin, FlutterStream
     //---------------------------------------------------------------------------------------------
     // Branch SDK Call Methods
     // --------------------------------------------------------------------------------------------
+    private func setupBranch(call: FlutterMethodCall, result: @escaping FlutterResult) {
+        
+        if (isInitialized) {
+            result(true)
+        }
+        let args = call.arguments as! [String: Any?]
+        
+#if DEBUG
+        NSLog("setupBranch args: %@", args)
+#endif
+        
+        if args["disableTracking"] as! Bool == true {
+            Branch.setTrackingDisabled(true)
+        } else {
+            Branch.setTrackingDisabled(false)
+        }
+        
+       
+        if args["enableLogging"] as! Bool == true {
+            Branch.enableLogging(at: BranchLogLevel.debug)
+        }
+        
+        if (!requestMetadata.isEmpty) {
+            for param in requestMetadata {
+                Branch.getInstance().setRequestMetadataKey(param.key, value: param.value)
+            }
+        }
+        if (!snapParameters.isEmpty) {
+            for param in snapParameters {
+                Branch.getInstance().addSnapPartnerParameter(withName: param.key, value: param.value)
+            }
+        }
+        if (!facebookParameters.isEmpty) {
+            for param in facebookParameters {
+                Branch.getInstance().addFacebookPartnerParameter(withName: param.key, value: param.value)
+            }
+        }
+        isInitialized = true
+        result(true)
+    }
+    
     private func getShortUrl(call: FlutterMethodCall, result: @escaping FlutterResult) {
         let args = call.arguments as! [String: Any?]
         let buoDict = args["buo"] as! [String: Any?]
@@ -265,7 +285,7 @@ public class SwiftFlutterBranchSdkPlugin: NSObject, FlutterPlugin, FlutterStream
         
         let response : NSMutableDictionary! = [:]
         buo?.getShortUrl(with: lp!) { (url, error) in
-            if (error == nil) {
+            if ((error == nil && url != nil) || (error != nil && url != nil)) {
                 NSLog("getShortUrl: %@", url!)
                 response["success"] = NSNumber(value: true)
                 response["url"] = url!
@@ -419,6 +439,13 @@ public class SwiftFlutterBranchSdkPlugin: NSObject, FlutterPlugin, FlutterStream
         let key = args["key"] as! String
         let value = args["value"] as! String
         
+        
+        if (requestMetadata.keys.contains(key) && value.isEmpty) {
+            requestMetadata.removeValue(forKey: key)
+        } else {
+            requestMetadata[key] = value;
+        }
+        
         DispatchQueue.main.async {
             Branch.getInstance().setRequestMetadataKey(key, value: value)
         }
@@ -480,14 +507,6 @@ public class SwiftFlutterBranchSdkPlugin: NSObject, FlutterPlugin, FlutterStream
             DispatchQueue.main.async {
                 result(response)
             }
-        }
-    }
-    
-    private func setSKAdNetworkMaxTime(call: FlutterMethodCall) {
-        let args = call.arguments as! [String: Any?]
-        let maxTimeInterval = args["maxTimeInterval"] as? Int ?? 0
-        DispatchQueue.main.async {
-            Branch.getInstance().setSKAdNetworkCalloutMaxTimeSinceInstall(TimeInterval(maxTimeInterval * 3600))
         }
     }
     
@@ -590,25 +609,48 @@ public class SwiftFlutterBranchSdkPlugin: NSObject, FlutterPlugin, FlutterStream
         let key = args["key"] as! String
         let value = args["value"] as! String
         
+        if (facebookParameters.keys.contains(key) && value.isEmpty) {
+            facebookParameters.removeValue(forKey: key)
+        } else {
+            facebookParameters[key] = value;
+        }
+        
         DispatchQueue.main.async {
             Branch.getInstance().addFacebookPartnerParameter(withName: key, value:value)
         }
     }
-
+    
     private func addSnapPartnerParameter(call: FlutterMethodCall) {
         let args = call.arguments as! [String: Any?]
         let key = args["key"] as! String
         let value = args["value"] as! String
         
+        if (snapParameters.keys.contains(key) && value.isEmpty) {
+            snapParameters.removeValue(forKey: key)
+        } else {
+            snapParameters[key] = value;
+        }
+        
         DispatchQueue.main.async {
             Branch.getInstance().addSnapPartnerParameter(withName: key, value:value)
         }
     }
-
+    
     private func setPreinstallCampaign(call: FlutterMethodCall) {
     }
     
     private func setPreinstallPartner(call: FlutterMethodCall) {
+    }
+    
+    private func setDMAParamsForEEA(call: FlutterMethodCall) {
+        let args = call.arguments as! [String: Any?]
+        let eeaRegion = args["eeaRegion"] as! Bool
+        let adPersonalizationConsent = args["adPersonalizationConsent"]  as! Bool
+        let adUserDataUsageConsent = args["adUserDataUsageConsent"] as! Bool
+        
+        DispatchQueue.main.async {
+            Branch.setDMAParamsForEEA(eeaRegion,adPersonalizationConsent: adPersonalizationConsent, adUserDataUsageConsent: adUserDataUsageConsent)
+        }
     }
     
     

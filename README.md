@@ -2,14 +2,16 @@
 
 [![Branch](https://github.com/RodrigoSMarques/flutter_branch_sdk/blob/master/assets/branch.png?raw=true)](https://branch.io)
 
+[![Plugin code analysis](https://github.com/RodrigoSMarques/flutter_branch_sdk/actions/workflows/ci.yaml/badge.svg?branch=master)](https://github.com/RodrigoSMarques/flutter_branch_sdk/actions/workflows/ci.yaml)
+
 This is a Flutter plugin that implemented [Branch SDK](https://branch.io).
 
 Branch.io helps mobile apps grow with deep links that power referral systems, sharing links and invites with full attribution and analytics.
 
 Supports Android, iOS and Web.
 
-* Android - Branch SDK Version >= 5.4.+ [Android Version History](https://github.com/BranchMetrics/android-branch-deep-linking-attribution/releases)
-* iOS - Branch SDK Version >= 2.1.+ [iOS Version History](https://github.com/BranchMetrics/ios-branch-deep-linking-attribution/releases)
+* Android - Branch SDK Version >= 5.12.0 [Android Version History](https://github.com/BranchMetrics/android-branch-deep-linking-attribution/releases)
+* iOS - Branch SDK Version >= 3.4.3 [iOS Version History](https://github.com/BranchMetrics/ios-branch-deep-linking-attribution/releases)
 
 Implemented functions in plugin:
 
@@ -21,7 +23,7 @@ Enable / Disable User Tracking | X | X | X
 Get First and Last Parameters | X | X | X
 Generate Deep Link for Branch Universal Object (BUO)| X | X | X
 Show Share Sheet for Branch Universal Object (BUO)| X | X | X
-List BUO on Search / Remove BUO from Search| X | X | Not supported
+List BUO on Search / Remove BUO from Search|  | X | 
 Register view| X | X | X
 Track User Actions and Events| X | X | X
 Init Branch Session and Deep Link| X | X | X
@@ -33,29 +35,38 @@ Handle Links in Your Own App| X | X | X
 ## Getting Started
 ### Configure Branch Dashboard
 * Register Your App
-* Complete the Basic integration in [Branch Dashboard](https://dashboard.branch.io/login)
+* Configure Branch Dashboard [Branch Dashboard](https://dashboard.branch.io/login)
 
 For details see:
 
-* [iOS - only section: **Configure Branch**](https://help.branch.io/developers-hub/docs/ios-basic-integration#configure-branch)
-* [Android - only section: **Configure Branch Dashboard**](https://help.branch.io/developers-hub/docs/android-basic-integration#configure-branch-dashboard)
+* [iOS: only section: **Configure Branch Dashboard**](https://help.branch.io/developers-hub/docs/ios-basic-integration#1-configure-branch-dashboard)
+* [Android - only section: **Configure Branch Dashboard**](https://help.branch.io/developers-hub/docs/android-basic-integration#1-configure-branch-dashboard)
 
 ## Configure Platform Project
 ### Android Integration
 
-Follow the steps on the page [https://help.branch.io/developers-hub/docs/android-basic-integration#configure-app](https://help.branch.io/developers-hub/docs/android-basic-integration#configure-app), session _**Configure app**_:
-* Add Branch to your `AndroidManifest.xml`
+Follow only the steps:
+
+* [Configure App](https://help.branch.io/developers-hub/docs/android-basic-integration#4-configure-app)
+* [Configure ProGuard](https://help.branch.io/developers-hub/docs/android-basic-integration#7-configure-proguard)
+
+**Note**: It is not necessary to perform the Branch Android SDK installation steps. The plugin performs these steps.
 
 ### iOS Integration
-Follow the steps on the page [https://help.branch.io/developers-hub/docs/ios-basic-integration#configure-bundle-identifier](https://help.branch.io/developers-hub/docs/ios-basic-integration#configure-bundle-identifier), from session ```Configure bundle identifier```:
-* Configure bundle identifier
-* Configure associated domains
-* Configure entitlements
-* Configure Info.plist
-* Confirm app prefix
+Follow only the steps:
 
-> Note:  In `Info.plist`  not add `branch_key` `live` and `test` at the same time.<br />
-Use only `branch_key` and update as needed.
+* [Configure bundle identifier](https://help.branch.io/developers-hub/docs/ios-basic-integration#2-configure-bundle-identifier)
+* [Configure associated domains](https://help.branch.io/developers-hub/docs/ios-basic-integration#3-configure-associated-domains)
+* [Configure Info.plist](https://help.branch.io/developers-hub/docs/ios-basic-integration#4-configure-infoplist)
+
+**Note**: It is not necessary to perform the Branch iOS SDK installation steps. The plugin performs these steps.
+
+#### NativeLink™ Deferred Deep Linking
+Use iOS pasteboard to enable deferred deep linking via Branch NativeLink™, which enables 100% matching on iOS through Installs.
+
+Follow the steps on the [page](https://help.branch.io/developers-hub/docs/ios-advanced-features#nativelink-deferred-deep-linking), session _**NativeLink™ Deferred Deep Linking**_,
+
+**Note**: Code implementation in Swift is not necessary. The plugin already implements the code, requiring only configuration on the Dashboard.
 
 ### Web Integration
 
@@ -63,11 +74,13 @@ You need add Branch Javascript in your `web\index.html` at the top of your `<bod
 
 ```javascript
   <script>
-    (function(b,r,a,n,c,h,_,s,d,k){if(!b[n]||!b[n]._q){for(;s<_.length;)c(h,_[s++]);d=r.createElement(a);d.async=1;d.src="https://cdn.branch.io/branch-latest.min.js";k=r.getElementsByTagName(a)[0];k.parentNode.insertBefore(d,k);b[n]=h}})(window,document,"script","branch",function(b,r){b[r]=function(){b._q.push([r,arguments])}},{_q:[],_v:1},"addListener applyCode autoAppIndex banner closeBanner closeJourney creditHistory credits data deepview deepviewCta first getCode init link logout redeem referrals removeListener sendSMS setBranchViewData setIdentity track validateCode trackCommerceEvent logEvent disableTracking".split(" "), 0);
-    branch.init('key_live_YOUR_KEY_GOES_HERE');
+    // load Branch
+    (function(b,r,a,n,c,h,_,s,d,k){if(!b[n]||!b[n]._q){for(;s<_.length;)c(h,_[s++]);d=r.createElement(a);d.async=1;d.src="https://cdn.branch.io/branch-latest.min.js";k=r.getElementsByTagName(a)[0];k.parentNode.insertBefore(d,k);b[n]=h}})(window,document,"script","branch",function(b,r){b[r]=function(){b._q.push([r,arguments])}},{_q:[],_v:1},"addListener banner closeBanner closeJourney data deepview deepviewCta first init link logout removeListener setBranchViewData setIdentity track trackCommerceEvent logEvent disableTracking getBrowserFingerprintId crossPlatformIds lastAttributedTouchData setAPIResponseCallback qrCode setRequestMetaData setAPIUrl getAPIUrl setDMAParamsForEEA".split(" "), 0);
+    // init Branch
+    branch.init('key_live_or_test_YOUR_KEY_GOES_HERE');
   </script>
 ```
-Change `key_live_YOUR_KEY_GOES_HERE` to match your [Branch Dashboard](https://dashboard.branch.io/account-settings/app)
+Change `key_live_or_test_YOUR_KEY_GOES_HERE ` to match your [Branch Dashboard](https://dashboard.branch.io/account-settings/app)
 
 If `branch.init()` fails, all subsequent Branch methods will fail.
 
@@ -107,8 +120,10 @@ Full example `index.html`:
 </head>
 <body>
   <script>
-    (function(b,r,a,n,c,h,_,s,d,k){if(!b[n]||!b[n]._q){for(;s<_.length;)c(h,_[s++]);d=r.createElement(a);d.async=1;d.src="https://cdn.branch.io/branch-latest.min.js";k=r.getElementsByTagName(a)[0];k.parentNode.insertBefore(d,k);b[n]=h}})(window,document,"script","branch",function(b,r){b[r]=function(){b._q.push([r,arguments])}},{_q:[],_v:1},"addListener applyCode autoAppIndex banner closeBanner closeJourney creditHistory credits data deepview deepviewCta first getCode init link logout redeem referrals removeListener sendSMS setBranchViewData setIdentity track validateCode trackCommerceEvent logEvent disableTracking".split(" "), 0);
-    branch.init('key_live_YOUR_KEY_GOES_HERE');
+    // load Branch
+    (function(b,r,a,n,c,h,_,s,d,k){if(!b[n]||!b[n]._q){for(;s<_.length;)c(h,_[s++]);d=r.createElement(a);d.async=1;d.src="https://cdn.branch.io/branch-latest.min.js";k=r.getElementsByTagName(a)[0];k.parentNode.insertBefore(d,k);b[n]=h}})(window,document,"script","branch",function(b,r){b[r]=function(){b._q.push([r,arguments])}},{_q:[],_v:1},"addListener banner closeBanner closeJourney data deepview deepviewCta first init link logout removeListener setBranchViewData setIdentity track trackCommerceEvent logEvent disableTracking getBrowserFingerprintId crossPlatformIds lastAttributedTouchData setAPIResponseCallback qrCode setRequestMetaData setAPIUrl getAPIUrl setDMAParamsForEEA".split(" "), 0);
+    // init Branch
+    branch.init('key_live_or_test_YOUR_KEY_GOES_HERE');
   </script>
   <!-- This script installs service_worker.js to provide PWA functionality to
        application. For more information, see:
@@ -130,6 +145,29 @@ Full example `index.html`:
 To use the plugin, add `flutter_branch_sdk` as a [dependency in your pubspec.yaml file](https://pub.dev/packages/flutter_branch_sdk/install).
 
 ## How to use
+
+### Initializing
+
+To initialize Branch:
+
+```dart
+import 'package:flutter_branch_sdk/flutter_branch_sdk.dart';
+
+await FlutterBranchSdk.init(enableLogging: false, disableTracking: false);
+```
+
+The optional parameters are:
+
+- *enableLogging* : Sets `true` turn on debug logging. Default value: false
+- *disableTracking*: Sets `true` to disable tracking in Branch SDK for GDPR compliant on start. Default value: false
+
+Initialization must be called from `main` or at any time, for example after getting consent for GPDR.
+
+To guarantee the success of this function, ensure you've called the below in the app's main function
+
+```dart
+WidgetsFlutterBinding.ensureInitialized();
+```
 
 ### Test Branch Integration
 Test your Branch Integration by calling:
@@ -182,14 +220,14 @@ Make sure to comment out or remove `validateSDKIntegration` in your production b
 To listen to the clicks on the deep link and retrieve the data it is necessary to add the code below:
 
 ```dart
-    StreamSubscription<Map> streamSubscription = FlutterBranchSdk.initSession().listen((data) {
+    StreamSubscription<Map> streamSubscription = FlutterBranchSdk.listSession().listen((data)  {
       if (data.containsKey("+clicked_branch_link") &&
           data["+clicked_branch_link"] == true) {
          //Link clicked. Add logic to get link data
          print('Custom string: ${data["custom_string"]}');
       }
     }, onError: (error) {
-		print('InitSesseion error: ${error.toString()}');
+		print('listSession error: ${error.toString()}');
     });
 ```
 
@@ -202,7 +240,10 @@ If you ever want to access the original session params (the parameters passed in
     Map<dynamic, dynamic> params = await FlutterBranchSdk.getFirstReferringParams();
 ```
 
+*Note: You must call this method on `iOS` to obtain installation data if the return of the `FlutterBranchSdk.listSession()` function is {+is_first_session: true, +clicked_branch_link: false}*
+
 ### Retrieve session (install or open) parameters
+
 These session parameters will be available at any point later on with this command. If no parameters are available then Branch will return an empty dictionary. This refreshes with every new session (app installs AND app opens).
 
 ```dart
@@ -400,8 +441,10 @@ Replace *"https://flutterbranchsdk.test-app.link/sxz79EtAPub"* with your own lin
 > Handling a new deep link in your app will clear the current session data and a new referred "open" will be attributed.
 
 ### List content on Search
-* For Android list BUO links in Google Search with Firebase App Indexing API and locally  in Google In Apps search
 * For iOs list BUO links in Spotlight
+* For Android no action will be taken
+* For WEB not supported
+
 
 ```dart
     bool success = await FlutterBranchSdk.listOnSearch(buo: buo);
@@ -508,25 +551,6 @@ Add key value pairs to all requests
 FlutterBranchSdk.setRequestMetadata(requestMetadataKey, requestMetadataValue);
 ```
 
-### Set time window (in Hours) for SKAdNetwork callouts (iOS only)
-By default, Branch limits calls to SKAdNetwork to within 72 hours after first install.
-
-```dart
-FlutterBranchSdk.setIOSSKAdNetworkMaxTime(24);
-```
-
-### Apple Search Ads
-Branch can help track your Apple Search Ad campaigns by fetching the search ad attribution from Apple at app install.
-
-Add KEY ```branch_check_apple_ads``` in INFO.PLIST to enable checking for Apple Search Ads before Branch initialization.
-
-In `ios/Runner/Info.plist`, you should have something like:
-
-```xml
- 	<key>branch_check_apple_ads</key>
-	<true/>
-```
-
 ### iOS 14+ App Tracking Transparency
 Starting with iOS 14.5, iPadOS 14.5, and tvOS 14.5, you’ll need to receive the user’s permission through the AppTrackingTransparency framework to track them or access their device’s advertising identifier. Tracking refers to the act of linking user or device data collected from your app with user or device data collected from other companies’ apps, websites, or offline properties for targeted advertising or advertising measurement purposes. Tracking also refers to sharing user or device data with data brokers.
 
@@ -591,95 +615,60 @@ print(status);
 See: [https://developer.apple.com/documentation/adsupport/asidentifiermanager/1614151-advertisingidentifier](https://developer.apple.com/documentation/adsupport/asidentifiermanager/1614151-advertisingidentifier)
 
 
-### Enable Logging
-Use the Branch test key instead of the live key.
+### User Data
+#### Google DMA Compliance
 
-Logging is enabled by default in debug mode and disabled in release mode.
+In response to the European Union's enactment of the Digital Markets Act (DMA), the Branch Android SDK includes the `setDMAParamsForEEA` method to help you pass consent information from your user to Google.
 
-To enable/disable logging update `INFO.PLIST` on `iOS` or `AndroidManifest.xml` on Android:
+The `setDMAParamsForEEA` method takes 3 parameters:
 
-For `iOS` add to `INFO.PLIST`:
-
-To disable:
-
-```swift
-	<key>branch_enable_log</key>
-	<false/>
+```dart
+    FlutterBranchSdk.setDMAParamsForEEA(eeaRegion: true, adPersonalizationConsent: false, adUserDataUsageConsent: false);
 ```
 
-To enable:
+Parameter Name | Type | Description | When `true`| When `false` 
+|---|---|---|---|---|
+eeaRegion | Boolean | Whether European regulations, including the DMA, apply to this user and conversion | User is `included` in European Union regulations. For example, if the user is located within the EEA, they are within the scope of DMA | User is considered `excluded` from European Union regulations
+adPersonalizationConsent | Boolean | Whether end user has `granted` or denied ads personalization | User has `granted`  consent for ads personalization. | User has denied consent for ads personalization.
+adUserDataUsageConsent | Boolean | Whether end user has granted or denied consent for 3P transmission of user level data for ads. | User has `granted` consent for 3P transmission of user-level data for ads. | User has `denied`  consent for 3P transmission of user-level data for ads.
 
-```swift
-	<key>branch_enable_log</key>
-	<true/>
+When parameters are successfully set using `setDMAParamsForEEA`, they will be sent along with every future request to the following Branch endpoint.
+
+# Configuring the project to use Branch Test Key
+## Android
+
+Add or update the code below in `AndroidManifest.xml`:
+
+```xml
+<!-- Set to `true` to use `BranchKey.test` -->
+<meta-data 
+   android:name="io.branch.sdk.TestMode" android:value="true" />
 ```
 
-For `Android` add to `AndroidManifest.xml`:
+***Note***: Remember to set the value to `false` before releasing to production.
 
-To disable:
+### iOS
 
-```java
-    <meta-data android:name="branch_enable_log"
-        android:value="false" />
+1) Create an empty file called `branch.json`.
+
+2) Paste the content below into the file or make download [here](https://github.com/RodrigoSMarques/flutter_branch_sdk/blob/master/assets/branch.json):
+
+```json
+{
+  "useTestInstance": true
+}
+
 ```
 
-To enable:
+3) Add the file `branch.json` to your project using Xcode. Within your project, navigate to File → Add Files. 
 
-```java
-    <meta-data android:name="branch_enable_log"
-        android:value="true" />
-```
+4) Select the `branch.json` file and make sure every target in your project that uses Branch is selected.
 
-### Enabled Clipboard Deferred Deep Linking in iOS
-> Enabled by default starting with **iOS 15+ Only**
+![branch.json](https://github.com/RodrigoSMarques/flutter_branch_sdk/blob/master/assets/branch_json_add.png)
 
-Use iOS pasteboard to enable deferred deep linking.
+![branch.json](https://github.com/RodrigoSMarques/flutter_branch_sdk/blob/master/assets/branch_json_project.png)
 
-To enable Clipboard Deferred Deep Linking update `INFO.PLIST` on `iOS`
-
-Add to `INFO.PLIST`:
-
-```swift
-	<key>branch_check_pasteboard</key>
-	<true/>
-```
-
-### Facebook App Install Ads
-
-Branch links can be used together with Facebook App Install Campaign ads, allowing you to track ad-driven installs on the Branch dashboard and deep link those new users directly to content the first time they open your app.
-
-Follow the instructions on the link
-<a href="https://help.branch.io/using-branch/docs/facebook-app-install-ads" target="_blank">https://help.branch.io/using-branch/docs/facebook-app-install-ads</a>.
-
-
-
-To read Facebook App Install deep links update `INFO.PLIST` on `iOS` or `AndroidManifest.xml` on `Android` as in the example:
-
-For `iOS` add to `INFO.PLIST`:
-
-```swift
-	<key>branch_enable_facebook_ads</key>
-	<true/>
-```
-
-For `Android` add to `AndroidManifest.xml`:
-
-```java
-    <meta-data android:name="branch_enable_facebook_ads"
-        android:value="true" />
-```
-
-Follow the instructions to  install Facebook Android / iOS SDK:
-
-`iOS`: 
-
-<a href="https://developers.facebook.com/docs/ios/use-cocoapods" target="_blank">https://developers.facebook.com/docs/ios/use-cocoapods</a>
-
-`Android`: 
-
-<a href="https://developers.facebook.com/docs/android/getting-started" target="_blank">https://developers.facebook.com/docs/android/getting-started</a>
-
-
+**Note*:* Remember to set the value to `false` before releasing to production.
 
 # Getting Started
 See the `example` directory for a complete sample app using Branch SDK.

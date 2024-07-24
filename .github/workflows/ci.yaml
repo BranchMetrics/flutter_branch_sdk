@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - "master"
+      - "dev"
+      - "bugfix"
     paths-ignore:
       - "**/README.md"
       - "docs/**"
@@ -11,6 +13,7 @@ on:
     branches:
       - "master"
       - "dev"
+      - "bugfix"
 
 jobs:
   check-lint-flutter:
@@ -19,20 +22,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Setup flutter
         uses: subosito/flutter-action@v2
         with:
           cache: true
       - name: Lint
-        run: flutter format --output=none --set-exit-if-changed lib/
+        run: dart format --output=none --set-exit-if-changed lib/
   check-code-analysis-flutter:
     name: Code analysis (flutter)
     timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Setup flutter
         uses: subosito/flutter-action@v2
         with:

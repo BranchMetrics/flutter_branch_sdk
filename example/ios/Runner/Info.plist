@@ -25,10 +25,14 @@
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>flutterbranchsdk</string>
 			</array>
+			<key>CFBundleURLName</key>
+			<string>br.com.rsmarques.flutter-branch-sdk-example</string>
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
@@ -56,18 +60,20 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
-	<key>branch_app_domain</key>
-	<string>flutterbranchsdk.app.link</string>
-	<key>branch_check_apple_ads</key>
-	<false/>
-	<key>branch_check_pasteboard</key>
-	<true/>
-	<key>branch_enable_facebook_ads</key>
-	<false/>
-	<key>branch_enable_log</key>
-	<true/>
 	<key>branch_key</key>
-	<string>key_test_ipQTteg11ENANDeCzSXgqdgfuycWoXYH</string>
+	<dict>
+		<key>live</key>
+		<string>key_live_bkJRqpb15wLqUAgsDVNUIobjyviWi6Wx</string>
+		<key>test</key>
+		<string>key_test_ipQTteg11ENANDeCzSXgqdgfuycWoXYH</string>
+	</dict>
+	<key>branch_universal_link_domains</key>
+	<array>
+		<string>flutterbranchsdk.app.link</string>
+		<string>flutterbranchsdk-alternate.app.link</string>
+		<string>flutterbranchsdk-alternate.test-app.link</string>
+		<string>flutterbranchsdk.test-app.link</string>
+	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 </dict>

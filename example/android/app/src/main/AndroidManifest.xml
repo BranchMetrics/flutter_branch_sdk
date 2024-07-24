@@ -1,8 +1,7 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="br.com.rsmarques.flutter_branch_sdk_example">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
    <application
-        android:label="flutter_branch_sdk_example"
+        android:label="Flutter Branch SDK Example"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -56,10 +55,7 @@
        <meta-data
            android:name="io.branch.sdk.BranchKey.test"
            android:value="key_test_ipQTteg11ENANDeCzSXgqdgfuycWoXYH" />
-       <meta-data android:name="io.branch.sdk.TestMode" android:value="true" />
-       <meta-data android:name="branch_enable_log"
-           android:value="true" />
-       <meta-data android:name="branch_enable_facebook_ads"
-           android:value="false" />
+       <meta-data
+           android:name="io.branch.sdk.TestMode" android:value="true" />
     </application>
 </manifest>

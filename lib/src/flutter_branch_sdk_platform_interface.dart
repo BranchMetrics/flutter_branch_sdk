@@ -27,6 +27,14 @@ abstract class FlutterBranchSdkPlatform extends PlatformInterface {
     _instance = instance;
   }
 
+  ///Initialize Branch SDK
+  /// [enableLogging] - Sets `true` turn on debug logging
+  /// [disableTracking] - Sets `true` to disable tracking in Branch SDK for GDPR compliant on start. After having consent, sets `false`
+  Future<void> init(
+      {bool enableLogging = false, bool disableTracking = false}) async {
+    throw UnimplementedError('init has not been implemented');
+  }
+
   ///Identifies the current user to the Branch API by supplying a unique identifier as a userId value
   void setIdentity(String userId) {
     throw UnimplementedError('setIdentity has not been implemented');
@@ -60,9 +68,13 @@ abstract class FlutterBranchSdkPlatform extends PlatformInterface {
     throw UnimplementedError('disableTracking has not been implemented');
   }
 
-  ///Initialises a session with the Branch API
   ///Listen click em Branch Deeplinks
   Stream<Map<dynamic, dynamic>> initSession() {
+    throw UnimplementedError('initSession has not been implemented');
+  }
+
+  ///Listen click em Branch Deeplinks
+  Stream<Map<dynamic, dynamic>> listSession() {
     throw UnimplementedError('initSession has not been implemented');
   }
 
@@ -121,13 +133,6 @@ abstract class FlutterBranchSdkPlatform extends PlatformInterface {
       {required BranchUniversalObject buo,
       BranchLinkProperties? linkProperties}) async {
     throw UnimplementedError('removeFromSearch has not been implemented');
-  }
-
-  ///Set time window for SKAdNetwork callouts in Hours (Only iOS)
-  ///By default, Branch limits calls to SKAdNetwork to within 72 hours after first install.
-  void setIOSSKAdNetworkMaxTime(int hours) {
-    throw UnimplementedError(
-        'setIOSSKAdNetworkMaxTime has not been implemented');
   }
 
   ///Indicates whether or not this user has a custom identity specified for them. Note that this is independent of installs.
@@ -254,5 +259,16 @@ abstract class FlutterBranchSdkPlatform extends PlatformInterface {
   void addSnapPartnerParameter({required String key, required String value}) {
     throw UnimplementedError(
         'addSnapPartnerParameter has not been implemented');
+  }
+
+  /// Sets the value of parameters required by Google Conversion APIs for DMA Compliance in EEA region.
+  /// [eeaRegion] `true` If European regulations, including the DMA, apply to this user and conversion.
+  /// [adPersonalizationConsent] `true` If End user has granted/denied ads personalization consent.
+  /// [adUserDataUsageConsent] `true If User has granted/denied consent for 3P transmission of user level data for ads.
+  void setDMAParamsForEEA(
+      {required bool eeaRegion,
+      required bool adPersonalizationConsent,
+      required bool adUserDataUsageConsent}) {
+    throw UnimplementedError('setDMAParamsForEEA has not been implemented');
   }
 }
