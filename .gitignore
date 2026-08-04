@@ -8,12 +8,14 @@
 .buildlog/
 .history
 .svn/
+CLAUDE.MD
 
 # IntelliJ related
 *.iml
 *.ipr
 *.iws
 .idea/
+
 
 # The .vscode folder contains launch configuration and tasks you configure in
 # VS Code which you may wish to be included in version control, so this line
@@ -71,3 +73,11 @@
 !**/ios/**/default.pbxuser
 !**/ios/**/default.perspectivev3
 !/packages/flutter_tools/test/data/dart_dependencies_test/**/.packages
+/ios/flutter_branch_sdk/.build
+/example/android/app/.cxx
+/ios/flutter_branch_sdk/.index-build
+.github/copilot-instructions.md
+ia_docs/
+test/
+UISCENE_MIGRATION.md
+/example_native

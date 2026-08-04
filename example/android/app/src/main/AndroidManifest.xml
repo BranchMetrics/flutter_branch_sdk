@@ -41,6 +41,7 @@
                 <data android:scheme="https" android:host="flutterbranchsdk-alternate.test-app.link" />
                 <data android:scheme="https" android:host="flutterbranchsdk.test-app.link" />
             </intent-filter>
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false" />
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
@@ -49,13 +50,13 @@
             android:value="2" />
        <!-- Branch init -->
        <meta-data
-           android:name="io.branch.sdk.BranchKey"
+           android:name="io.branch.sdk.BranchKey1"
            android:value="key_live_bkJRqpb15wLqUAgsDVNUIobjyviWi6Wx" />
        <!-- For your test app, if you have one; Again, use your actual test Branch key -->
        <meta-data
-           android:name="io.branch.sdk.BranchKey.test"
+           android:name="io.branch.sdk.BranchKey.test1"
            android:value="key_test_ipQTteg11ENANDeCzSXgqdgfuycWoXYH" />
        <meta-data
-           android:name="io.branch.sdk.TestMode" android:value="true" />
+           android:name="io.branch.sdk.TestMode1" android:value="true" />
     </application>
 </manifest>

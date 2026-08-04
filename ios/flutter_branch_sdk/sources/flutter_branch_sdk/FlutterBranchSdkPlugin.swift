@@ -1,0 +1,1261 @@
+import Flutter
+import UIKit
+import BranchSDK
+import AppTrackingTransparency
+import AdSupport
+
+// Plugin channel variables and constants
+var methodChannel: FlutterMethodChannel?
+var eventChannel: FlutterEventChannel?
+var logEventChannel : FlutterEventChannel?
+var logStreamHandler: LogStreamHandler?
+let MESSAGE_CHANNEL = "flutter_branch_sdk/message";
+let EVENT_CHANNEL = "flutter_branch_sdk/event";
+let LOG_CHANNEL = "flutter_branch_sdk/logStream";
+let ERROR_CODE = "FLUTTER_BRANCH_SDK_ERROR";
+let PLUGIN_NAME = "Flutter";
+let PLUGIN_VERSION = "9.3.3";
+let COCOA_POD_NAME = "org.cocoapods.flutter-branch-sdk";
+
+//---------------------------------------------------------------------------------------------
+// LogStreamHandler - Separate handler for log events
+// --------------------------------------------------------------------------------------------
+public class LogStreamHandler: NSObject, FlutterStreamHandler {
+    var logEventSink: FlutterEventSink?
+    private var logBuffer: [String] = []
+    private let bufferLock = NSLock()
+    private let maxBufferSize = 1000
+    
+    public func onListen(withArguments arguments: Any?, eventSink: @escaping FlutterEventSink) -> FlutterError? {
+        self.logEventSink = eventSink
+        
+        // Send buffered log messages
+        bufferLock.lock()
+        for bufferedMessage in logBuffer {
+            eventSink(bufferedMessage)
+        }
+        logBuffer.removeAll()
+        bufferLock.unlock()
+        
+        LogUtils.debug(message: "LOG_CHANNEL listener attached")
+        return nil
+    }
+    
+    public func onCancel(withArguments arguments: Any?) -> FlutterError? {
+        logEventSink = nil
+        LogUtils.debug(message: "LOG_CHANNEL listener cancelled")
+        return nil
+    }
+    
+    private func logLevelName(_ level: BranchLogLevel) -> String {
+        switch level {
+        case .verbose:
+            return "VERBOSE"
+        case .debug:
+            return "DEBUG"
+        case .warning:
+            return "WARNING"
+        case .error:
+            return "ERROR"
+        @unknown default:
+            return "UNKNOWN"
+        }
+    }
+    
+    // Enable Branch logging with callback and buffering
+    public func enableBranchLogging(at level: BranchLogLevel) {
+        Branch.enableLogging(at: level) { (message: String, logLevel: BranchLogLevel, error: Error?) in
+            let levelName = self.logLevelName(logLevel)
+            var formattedMessage = "[Branch \(levelName)] \(message)"
+            
+            if let error = error {
+                formattedMessage += " | Error: \(error)"
+            }
+            
+            self.bufferLock.lock()
+            if let sink = self.logEventSink {
+                // Send on main thread to comply with Flutter platform channel requirements
+                DispatchQueue.main.async {
+                    sink(formattedMessage)
+                }
+            } else {
+                // Buffer the message if sink is not ready
+                if self.logBuffer.count >= self.maxBufferSize {
+                    self.logBuffer.removeFirst() // Remove oldest message
+                    let droppedMessage = "⚠️ [Branch] Log buffer full (\(self.maxBufferSize) messages), dropping oldest messages"
+                    self.logBuffer.append(droppedMessage)
+                    LogUtils.debug(message: droppedMessage)
+                }
+                self.logBuffer.append(formattedMessage)
+                //LogUtils.debug(message: formattedMessage)
+            }
+            self.bufferLock.unlock()
+        }
+    }
+}
+
+public class FlutterBranchSdkPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, FlutterSceneLifeCycleDelegate  {
+    var eventSink: FlutterEventSink?
+    var logEventSink: FlutterEventSink?
+    var initialParams : [String: Any]? = nil
+    var initialError : NSError? = nil
+    
+    var enableLoggingFromJson = false
+    var isSdkConfigured = false
+
+    var isBranchInitDeferred = false
+    var isBranchSessionStarted = false
+    var isPluginInitialized = false
+
+    var requestMetadata : [String: String] = [:]
+    var facebookParameters : [String: String] = [:]
+    var snapParameters : [String: String] = [:]
+
+    static var branchJsonConfigFlutter: BranchJsonConfigFlutter? = nil
+    
+    //---------------------------------------------------------------------------------------------
+    // Plugin registry
+    // --------------------------------------------------------------------------------------------
+    public static func register(with registrar: FlutterPluginRegistrar) {
+        // Clean up any existing channels/handlers to avoid duplicates on re-register
+        if let _ = methodChannel {
+            methodChannel = nil
+        }
+        if let ev = eventChannel {
+            ev.setStreamHandler(nil)
+            eventChannel = nil
+        }
+        if let lev = logEventChannel {
+            lev.setStreamHandler(nil)
+            logEventChannel = nil
+        }
+
+        let instance = FlutterBranchSdkPlugin()
+        let handler = LogStreamHandler()
+        logStreamHandler = handler
+
+        methodChannel = FlutterMethodChannel(name: MESSAGE_CHANNEL, binaryMessenger: registrar.messenger())
+        eventChannel = FlutterEventChannel(name: EVENT_CHANNEL, binaryMessenger: registrar.messenger())
+        eventChannel!.setStreamHandler(instance)
+
+        logEventChannel = FlutterEventChannel(name: LOG_CHANNEL, binaryMessenger: registrar.messenger())
+        logEventChannel!.setStreamHandler(handler)
+
+        registrar.addApplicationDelegate(instance)
+        if #available(iOS 13.0, *) {
+            registrar.addSceneDelegate(instance)
+        }
+        registrar.addMethodCallDelegate(instance, channel: methodChannel!)
+
+        Self.branchJsonConfigFlutter = BranchJsonConfigFlutter.loadFromFile(registrar: registrar)
+    }
+
+    // Ensure stream handlers are removed when the plugin instance is deallocated
+    deinit {
+        if let ev = eventChannel {
+            ev.setStreamHandler(nil)
+        }
+        if let lev = logEventChannel {
+            lev.setStreamHandler(nil)
+        }
+        methodChannel = nil
+        logEventChannel = nil
+        eventChannel = nil
+        logStreamHandler = nil
+    }
+        
+    public func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [AnyHashable : Any] = [:]) -> Bool {
+        LogUtils.debug(message: "Application didFinishLaunchingWithOptions - App Delegate lifecycle")
+        
+        // Perform Branch configuration (shared logic)
+        configureBranchSDK()
+        
+        // Initialize Branch session
+        initializeBranchSession(launchOptions: launchOptions)
+        return true
+    }
+    
+    public func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
+        return Branch.getInstance().application(app, open: url, options: options)
+    }
+    
+    public func application(_ app: UIApplication, open url: URL, sourceApplication: String, annotation: Any) -> Bool {
+        return Branch.getInstance().application(app, open: url, sourceApplication: sourceApplication, annotation: annotation)
+    }
+    
+    public func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([Any]) -> Void) -> Bool {
+        return Branch.getInstance().continue(userActivity)
+    }
+    
+    public func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable : Any]) {
+        Branch.getInstance().handlePushNotification(userInfo)
+    }
+    
+    //---------------------------------------------------------------------------------------------
+    // UISceneDelegate Interface Methods (iOS 13+)
+    // --------------------------------------------------------------------------------------------
+    
+    /// Called when a scene is about to connect to the session.
+    /// This is the Scene lifecycle equivalent to application(_:didFinishLaunchingWithOptions:)
+    @available(iOS 13.0, *)
+    public func scene(
+        _ scene: UIScene,
+        willConnectTo session: UISceneSession,
+        options connectionOptions: UIScene.ConnectionOptions?
+    ) -> Bool {
+        LogUtils.debug(message: "Scene willConnectTo session - Scene lifecycle")
+        guard (scene as? UIWindowScene) != nil else { return false }
+
+        //Perform Branch configuration (shared logic)
+        configureBranchSDK()
+
+       // In Flutter 3.29+ with UIApplicationSceneManifest, FlutterAppDelegate no longer
+        // forwards application:didFinishLaunchingWithOptions: to plugin delegates, so
+        // initializeBranchSession is never called via that path. Call it here from the
+        // scene lifecycle instead. isBranchSessionStarted guards against double-init.
+        initializeBranchSession(launchOptions: nil)
+
+        // Pass URLs/activities from connection options to Branch using the scene-aware API.
+        // Return false so other plugins still receive the full connection options — the
+        // Bool is a Flutter dispatch signal only and does not affect Branch's own processing.
+        if let connOpts = connectionOptions, let userActivity = connOpts.userActivities.first {
+            BranchScene.shared().scene(scene, continue: userActivity)
+        } else if let connOpts = connectionOptions, !connOpts.urlContexts.isEmpty {
+            BranchScene.shared().scene(scene, openURLContexts: connOpts.urlContexts)
+        }
+
+        return false
+    }
+
+    /// Tells the delegate to open one or more URLs.
+    /// This is the Scene lifecycle equivalent to application(_:open:options:)
+    @available(iOS 13.0, *)
+    public func scene(
+        _ scene: UIScene,
+        openURLContexts URLContexts: Set<UIOpenURLContext>
+    ) -> Bool {
+        LogUtils.debug(message: "Scene openURLContexts - Scene lifecycle")
+        BranchScene.shared().scene(scene, openURLContexts: URLContexts)
+        return false
+    }
+
+    /// Tells the delegate to handle the specified Handoff-related activity.
+    /// This is the Scene lifecycle equivalent to application(_:continue:restorationHandler:)
+    @available(iOS 13.0, *)
+    public func scene(
+        _ scene: UIScene,
+        continue userActivity: NSUserActivity
+    ) -> Bool {
+        LogUtils.debug(message: "Scene continue userActivity - Scene lifecycle")
+        BranchScene.shared().scene(scene, continue: userActivity)
+        return false
+    }
+        
+    /// Called when the scene has moved from an inactive state to an active state.
+    @available(iOS 13.0, *)
+    public func sceneDidBecomeActive(_ scene: UIScene) {
+        LogUtils.debug(message: "Scene did become active - Scene lifecycle")
+    }
+    
+    /// Called when the scene will move from an active state to an inactive state.
+    @available(iOS 13.0, *)
+    public func sceneWillResignActive(_ scene: UIScene) {
+        LogUtils.debug(message: "Scene will resign active - Scene lifecycle")
+    }
+    
+    /// Called as the scene transitions from the background to the foreground.
+    @available(iOS 13.0, *)
+    public func sceneWillEnterForeground(_ scene: UIScene) {
+        LogUtils.debug(message: "Scene will enter foreground - Scene lifecycle")
+    }
+    
+    /// Called as the scene transitions from the foreground to the background.
+    @available(iOS 13.0, *)
+    public func sceneDidEnterBackground(_ scene: UIScene) {
+        LogUtils.debug(message: "Scene did enter background - Scene lifecycle")
+    }
+    
+    //---------------------------------------------------------------------------------------------
+    // Shared Branch SDK Configuration and Initialization Logic
+    // --------------------------------------------------------------------------------------------
+    /// Configures Branch SDK with settings from branch-config.json
+    /// This logic is shared between App Delegate and Scene Delegate initialization
+    private func configureBranchSDK() {
+        // Guard against double execution on iOS 13+ with Scene Delegate support
+        guard !isSdkConfigured else {
+            LogUtils.debug(message: "configureBranchSDK() already executed, skipping")
+            return
+        }
+        
+        // Check if Branch initialization should be deferred for plugin runtime based on branch.json.
+        isBranchInitDeferred = getDeferInitForPluginRuntimeFlag()
+
+        // Treat branch-config.json as optional: if present, apply JSON-driven settings,
+        // otherwise continue with default configuration but still perform plugin-level setup.
+        if let branchJsonConfig = FlutterBranchSdkPlugin.branchJsonConfigFlutter {
+            // Check for deprecated apiUrl parameter
+            if branchJsonConfig.apiUrl != nil {
+                LogUtils.debug(message: "⚠️ DEPRECATION: The apiUrl parameter has been deprecated. Please use apiUrlIOS instead.")
+            }
+
+            // Set API URL if provided
+            if let apiUrlIOS = branchJsonConfig.apiUrlIOS {
+                Branch.setAPIUrl(apiUrlIOS)
+                LogUtils.debug(message: "Set API URL from branch-config.json: \(apiUrlIOS)")
+            }
+
+            // Set Branch Key
+            if let branchKey = branchJsonConfig.branchKey {
+                Branch.setBranchKey(branchKey)
+                LogUtils.debug(message: "Set BranchKey from branch-config.json: \(branchKey)")
+            } else {
+                let testKey = branchJsonConfig.testKey ?? ""
+                let liveKey = branchJsonConfig.liveKey  ?? ""
+                let useTestInstance = branchJsonConfig.useTestInstance ?? false
+
+                if (useTestInstance && !testKey.isEmpty) {
+                    Branch.setBranchKey(testKey)
+                    LogUtils.debug(message: "Set TestKey from branch-config.json: \(testKey)")
+                } else if (!liveKey.isEmpty) {
+                    Branch.setBranchKey(liveKey)
+                    LogUtils.debug(message: "Set LiveKey from branch-config.json: \(liveKey)")
+                }
+            }
+
+            // Enable Branch logging if configured
+            if let enableLogging = branchJsonConfig.enableLogging, enableLogging {
+                let logLevelStr = branchJsonConfig.logLevel ?? "VERBOSE"
+                let logLevel = mapLogLevel(logLevelStr)
+
+                if let handler = logStreamHandler {
+                    handler.enableBranchLogging(at: logLevel)
+                }
+                self.enableLoggingFromJson = true
+                LogUtils.debug(message: "Set enableLogging and logLevel from branch-config.json: \(logLevelStr)")
+            }
+
+            // Set installReferrerTimeout if configured
+            if let installReferrerTimeout = branchJsonConfig.installReferrerTimeout, installReferrerTimeout >= 0 {
+                LogUtils.debug(message: "setInstallReferrerTimeout called with value \(installReferrerTimeout)ms, but not directly applicable for iOS SDK version.")
+            }
+        } else {
+            LogUtils.debug(message: "No branch-config.json found, using default configuration")
+        }
+
+        // Register plugin name and version
+        Branch.getInstance().registerPluginName(PLUGIN_NAME, version: PLUGIN_VERSION)
+                
+        // Check pasteboard on install (iOS 15+)
+        let disable_nativelink: Bool = Bundle.main.object(forInfoDictionaryKey: "branch_disable_nativelink") as? Bool ?? false
+        LogUtils.debug(message: "Disable NativeLink: \(String(describing: disable_nativelink))")
+        
+        if !disable_nativelink {
+            if #available(iOS 15.0, *) {
+                Branch.getInstance().checkPasteboardOnInstall()
+            }
+        }
+        
+        // Mark SDK as configured after successful initialization
+        self.isSdkConfigured = true
+    }
+    
+    /// Initializes Branch session with the provided launch options
+    /// This logic is shared between App Delegate and Scene Delegate initialization
+    private func initializeBranchSession(launchOptions: [AnyHashable: Any]?) {
+        if (isBranchSessionStarted) {
+            return;
+        }
+        
+        if (isBranchInitDeferred) {
+            LogUtils.debug(message: "Branch session will cache internally until notifyNativeToInit is called (deferInitForPluginRuntime: true)")
+        } else {
+            LogUtils.debug(message: "Branch session will be initialized immediately (deferInitForPluginRuntime: false)")
+        }
+
+        Branch.getInstance().initSession(launchOptions: launchOptions) { (params, error) in
+            if error == nil {
+                LogUtils.debug(message: "InitSession params: \(String(describing: params as? [String: Any]))")
+                guard let _ = self.eventSink else {
+                    self.initialParams = params as? [String: Any]
+                    return
+                }
+                // Send on main thread to comply with Flutter platform channel requirements
+                DispatchQueue.main.async {
+                    self.eventSink!(params as? [String: Any])
+                }
+            } else {
+                let err = (error! as NSError)
+                LogUtils.debug(message: "Branch InitSession error: \(err.localizedDescription)")
+                guard let _ = self.eventSink else {
+                    self.initialError = err
+                    return
+                }
+                // Send on main thread to comply with Flutter platform channel requirements
+                DispatchQueue.main.async {
+                    self.eventSink!(FlutterError(code: String(err.code), message: err.localizedDescription, details: nil))
+                }
+            }
+        }
+        isBranchSessionStarted = true
+    }
+    
+    //---------------------------------------------------------------------------------------------
+    // FlutterStreamHandler Interface Methods
+    // --------------------------------------------------------------------------------------------
+    public func onListen(withArguments arguments: Any?, eventSink: @escaping FlutterEventSink) -> FlutterError? {
+        self.eventSink = eventSink
+        if (initialParams != nil) {
+            self.eventSink!(self.initialParams)
+        } else if (initialError != nil) {
+            self.eventSink!(FlutterError(code: String(self.initialError!.code),message: self.initialError!.localizedDescription, details: nil))
+        }
+        initialParams = nil
+        initialError = nil
+        return nil
+    }
+    
+    public func onCancel(withArguments arguments: Any?) -> FlutterError? {
+        eventSink = nil
+        initialParams = nil
+        initialError = nil
+        return nil
+    }
+    
+    //---------------------------------------------------------------------------------------------
+    // FlutterMethodChannel Interface Methods
+    // --------------------------------------------------------------------------------------------
+    public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        switch (call.method) {
+        case "init":
+            setupBranch(call: call, result: result)
+            break
+        case "getShortUrl":
+            getShortUrl(call: call, result: result)
+            break
+        case "showShareSheet":
+            showShareSheet(call: call, result: result)
+            break
+        case "registerView":
+            registerView(call: call)
+            break
+        case "listOnSearch":
+            listOnSearch(call: call, result: result)
+            break
+        case "removeFromSearch":
+            removeFromSearch(call: call, result: result)
+            break
+        case "trackContent":
+            trackContent(call: call)
+            break
+        case "trackContentWithoutBuo":
+            trackContentWithoutBuo(call: call)
+            break
+        case "setIdentity":
+            setIdentity(call: call)
+            break
+        case "setRequestMetadata":
+            setRequestMetadata(call: call);
+            break
+        case "logout":
+            logout()
+            break
+        case "getLatestReferringParams":
+            getLatestReferringParams(result: result)
+            break
+        case "getFirstReferringParams":
+            getFirstReferringParams(result: result)
+            break
+        case "setTrackingDisabled":
+            setTrackingDisabled(call: call)
+            break
+        case "validateSDKIntegration":
+            validateSDKIntegration()
+            break
+        case "isUserIdentified":
+            isUserIdentified(result: result)
+            break
+        case "requestTrackingAuthorization" :
+            requestTrackingAuthorization(result: result)
+            break
+        case "getTrackingAuthorizationStatus" :
+            getTrackingAuthorizationStatus(result: result)
+            break
+        case "getAdvertisingIdentifier" :
+            getAdvertisingIdentifier(result: result)
+            break
+        case "setConnectTimeout":
+            setConnectTimeout(call: call)
+            break
+        case "setRetryCount":
+            setRetryCount(call: call)
+            break
+        case "setRetryInterval":
+            setRetryInterval(call: call)
+            break
+        case "setInstallReferrerTimeout":
+            setInstallReferrerTimeout(call: call)
+            break
+        case "setTimeout":
+            setTimeout(call: call)
+            break
+        case "getLastAttributedTouchData":
+            getLastAttributedTouchData(call: call, result: result)
+            break
+        case "getQRCode":
+            getQRCode(call: call, result: result)
+            break
+        case "shareWithLPLinkMetadata":
+            shareWithLPLinkMetadata(call: call, result: result)
+            break
+        case "handleDeepLink":
+            handleDeepLink(call: call)
+            break
+        case "addFacebookPartnerParameter" :
+            addFacebookPartnerParameter(call: call)
+            break
+        case  "clearPartnerParameters" :
+            Branch.getInstance().clearPartnerParameters()
+            break
+        case "setPreinstallCampaign" :
+            setPreinstallPartner(call: call)
+            break
+        case "setPreinstallPartner" :
+            setPreinstallPartner(call: call)
+            break
+        case "addSnapPartnerParameter" :
+            addSnapPartnerParameter(call: call)
+            break
+        case "setDMAParamsForEEA":
+            setDMAParamsForEEA(call: call)
+            break;
+        case "setConsumerProtectionAttributionLevel" :
+            setConsumerProtectionAttributionLevel(call: call)
+            break;
+        case "setAnonID":
+            setAnonID(call: call)
+            break;
+        case "setSDKWaitTimeForThirdPartyAPIs":
+            setSDKWaitTimeForThirdPartyAPIs(call: call)
+            break;
+        default:
+            result(FlutterMethodNotImplemented)
+            break
+        }
+    }
+    
+    //---------------------------------------------------------------------------------------------
+    // Helper Functions
+    // --------------------------------------------------------------------------------------------
+    
+    private func getRootViewController() -> UIViewController? {
+        if #available(iOS 13.0, *) {
+            let windowScene = UIApplication.shared.connectedScenes
+                .filter { $0.activationState == .foregroundActive }
+                .first as? UIWindowScene
+            return windowScene?.windows.first(where: { $0.isKeyWindow })?.rootViewController
+        } else {
+            return UIApplication.shared.keyWindow?.rootViewController
+        }
+    }
+    
+    private func flutterError(message: String, details: Any? = nil) -> FlutterError {
+        return FlutterError(code: ERROR_CODE, message: message, details: details)
+    }
+    
+    //---------------------------------------------------------------------------------------------
+    // Branch SDK Call Methods
+    // --------------------------------------------------------------------------------------------
+    private func setupBranch(call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let enableLogging = args["enableLogging"] as? Bool,
+              let logLevel = args["logLevel"] as? String,
+              let branchAttributionLevel = args["branchAttributionLevel"] as? String
+        else {
+            result(flutterError(message: "Invalid arguments provided for init", details: call.arguments))
+            return
+        }
+        
+        LogUtils.debug(message: "init args: \(args)")
+        
+        if isPluginInitialized {
+            result(true)
+            return
+        }
+
+        if !branchAttributionLevel.isEmpty {
+            Branch.getInstance().setConsumerProtectionAttributionLevel(BranchAttributionLevel(rawValue: branchAttributionLevel))
+        }
+        
+        // JSON config has priority - only enable/disable logging if not set via JSON
+        if !enableLoggingFromJson {
+            if enableLogging {
+                let branchLogLevel = mapLogLevel(logLevel)
+                // Enable Branch logging with callback through LogStreamHandler
+                if let handler = logStreamHandler {
+                    handler.enableBranchLogging(at: branchLogLevel)
+                }
+                LogUtils.debug(message: "Enabled logging with level: \(logLevel)")
+            }
+        }
+        
+        for (key, value) in requestMetadata {
+            Branch.getInstance().setRequestMetadataKey(key, value: value)
+        }
+        for (key, value) in snapParameters {
+            Branch.getInstance().addSnapPartnerParameter(withName: key, value: value)
+        }
+        for (key, value) in facebookParameters {
+            Branch.getInstance().addFacebookPartnerParameter(withName: key, value: value)
+        }
+        
+        if (isBranchInitDeferred) {
+            LogUtils.debug(message: "notifyNativeToInit() called")
+            Branch.getInstance().notifyNativeToInit()
+        }
+        
+        isPluginInitialized = true
+        result(true)
+    }
+    
+    private func getShortUrl(call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let buoDict = args["buo"] as? [String: Any?],
+              let lpDict = args["lp"] as? [String: Any?]
+        else {
+            result(flutterError(message: "Invalid arguments provided for getShortUrl", details: call.arguments))
+            return
+        }
+        
+        guard let buo = convertToBUO(dict: buoDict), let lp = convertToLp(dict: lpDict) else {
+            result(flutterError(message: "Failed to create Branch Universal Object or Link Properties.", details: call.arguments))
+            return
+        }
+        
+        var response: [String: Any] = [:]
+        buo.getShortUrl(with: lp) { (url, error) in
+            if let urlString = url, error == nil {
+                NSLog("getShortUrl: %@", urlString)
+                response["success"] = true
+                response["url"] = urlString
+            } else {
+                response["success"] = false
+                if let err = error as NSError? {
+                    response["errorCode"] = String(err.code)
+                    response["errorMessage"] = err.localizedDescription
+                } else {
+                    response["errorCode"] = ""
+                    response["errorMessage"] = "Error message not returned by Branch SDK. See log for details."
+                }
+            }
+            DispatchQueue.main.async {
+                result(response)
+            }
+        }
+    }
+    
+    private func showShareSheet(call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let buoDict = args["buo"] as? [String: Any?],
+              let lpDict = args["lp"] as? [String: Any?],
+              let shareText = args["messageText"] as? String
+        else {
+            result(flutterError(message: "Invalid arguments provided for showShareSheet", details: call.arguments))
+            return
+        }
+        
+        guard let controller = getRootViewController() else {
+            result(flutterError(message: "Could not find root view controller to present share sheet"))
+            return
+        }
+        
+        guard let buo = convertToBUO(dict: buoDict), let lp = convertToLp(dict: lpDict) else {
+            result(flutterError(message: "Failed to create Branch Universal Object or Link Properties.", details: call.arguments))
+            return
+        }
+        
+        var response: [String: Any] = [:]
+        buo.showShareSheet(with: lp, andShareText: shareText, from: controller) { (activityType, completed, error) in
+            if completed {
+                response["success"] = true
+            } else {
+                response["success"] = false
+                if let err = error as NSError? {
+                    response["errorCode"] = String(err.code)
+                    response["errorMessage"] = err.localizedDescription
+                } else {
+                    response["errorCode"] = "-1"
+                    response["errorMessage"] = "Share sheet cancelled by user or unknown error"
+                }
+            }
+            DispatchQueue.main.async {
+                result(response)
+            }
+        }
+    }
+    
+    private func validateSDKIntegration() {
+        DispatchQueue.main.async {
+            Branch.getInstance().validateSDKIntegration()
+        }
+    }
+    
+    private func trackContent(call: FlutterMethodCall) {
+        guard let args = call.arguments as? [String: Any],
+              let buoDictArray = args["buo"] as? [[String: Any?]],
+              let eventDict = args["event"] as? [String: Any?]
+        else {
+            LogUtils.debug(message: "Invalid arguments provided for trackContent")
+            return
+        }
+        
+        let buoList = buoDictArray.compactMap { convertToBUO(dict: $0) }
+        guard let event = convertToEvent(dict: eventDict) else {
+            LogUtils.debug(message: "Failed to create BranchEvent from event dictionary")
+            return
+        }
+        
+        event.contentItems = buoList
+        
+        DispatchQueue.main.async {
+            event.logEvent()
+        }
+    }
+    
+    private func trackContentWithoutBuo(call: FlutterMethodCall) {
+        guard let args = call.arguments as? [String: Any],
+              let eventDict = args["event"] as? [String: Any?]
+        else {
+            LogUtils.debug(message: "Invalid arguments provided for trackContentWithoutBuo")
+            return
+        }
+        
+        guard let event = convertToEvent(dict: eventDict) else {
+            LogUtils.debug(message: "Failed to create BranchEvent from event dictionary")
+            return
+        }
+        
+        DispatchQueue.main.async {
+            event.logEvent()
+        }
+    }
+    
+    private func registerView(call: FlutterMethodCall) {
+        guard let args = call.arguments as? [String: Any],
+              let buoDict = args["buo"] as? [String: Any?]
+        else {
+            LogUtils.debug(message: "Invalid arguments provided for registerView")
+            return
+        }
+        
+        guard let buo = convertToBUO(dict: buoDict) else {
+            LogUtils.debug(message: "ailed to create BranchUniversalObject from dictionary")
+            return
+        }
+        
+        DispatchQueue.main.async {
+            buo.registerView()
+        }
+    }
+    
+    private func listOnSearch(call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let buoDict = args["buo"] as? [String: Any?]
+        else {
+            result(flutterError(message: "Invalid arguments provided for listOnSearch", details: call.arguments))
+            return
+        }
+        
+        guard let buo = convertToBUO(dict: buoDict) else {
+            result(flutterError(message: "Failed to create BranchUniversalObject from dictionary", details: buoDict))
+            return
+        }
+        
+        if let lpDict = args["lp"] as? [String: Any?], let lp = convertToLp(dict: lpDict) {
+            buo.listOnSpotlight(with: lp) { (url, error) in
+                DispatchQueue.main.async {
+                    if (error != nil) {
+                        LogUtils.debug(message: "Failed indexed on spotlight \(error)")
+                    }
+                    result(error == nil)
+                }
+            }
+        } else {
+            buo.listOnSpotlight() { (url, error) in
+                DispatchQueue.main.async {
+                    if (error != nil) {
+                        LogUtils.debug(message: "Failed indexed on spotlight \(error)")
+                    }
+                    result(error == nil)
+                }
+            }
+        }
+
+    }
+    
+    private func removeFromSearch(call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let buoDict = args["buo"] as? [String: Any?]
+        else {
+            result(flutterError(message: "Invalid arguments provided for removeFromSearch", details: call.arguments))
+            return
+        }
+        
+        guard let buo = convertToBUO(dict: buoDict) else {
+            result(flutterError(message: "Failed to create BranchUniversalObject from dictionary", details: buoDict))
+            return
+        }
+        
+        buo.removeFromSpotlight { (error) in
+            DispatchQueue.main.async {
+                if (error != nil) {
+                    LogUtils.debug(message: "Failed remove on spotligh \(error)")
+                }
+                result(error == nil)
+            }
+        }
+    }
+    
+    private func setIdentity(call: FlutterMethodCall) {
+        guard let args = call.arguments as? [String: Any],
+              let userId = args["userId"] as? String else {
+            LogUtils.debug(message: "Invalid arguments provided for setIdentity")
+            return
+        }
+        
+        DispatchQueue.main.async {
+            Branch.getInstance().setIdentity(userId)
+        }
+    }
+    
+    private func setRequestMetadata(call: FlutterMethodCall) {
+        guard let args = call.arguments as? [String: Any],
+              let key = args["key"] as? String,
+              let value = args["value"] as? String else {
+            LogUtils.debug(message: "Invalid arguments provided for setRequestMetadata")
+            return
+        }
+        
+        if requestMetadata.keys.contains(key) && value.isEmpty {
+            requestMetadata.removeValue(forKey: key)
+        } else {
+            requestMetadata[key] = value
+        }
+        
+        DispatchQueue.main.async {
+            Branch.getInstance().setRequestMetadataKey(key, value: value)
+        }
+    }
+    
+    private func logout() {
+        DispatchQueue.main.async {
+            Branch.getInstance().logout()
+        }
+    }
+    
+    private func getLatestReferringParams(result: @escaping FlutterResult) {
+        let latestParams = Branch.getInstance().getLatestReferringParams()
+        DispatchQueue.main.async {
+            result(latestParams)
+        }
+    }
+    
+    private func getFirstReferringParams(result: @escaping FlutterResult) {
+        let firstParams = Branch.getInstance().getFirstReferringParams()
+        DispatchQueue.main.async {
+            result(firstParams)
+        }
+    }
+    
+    private func setTrackingDisabled(call: FlutterMethodCall) {
+        guard let args = call.arguments as? [String: Any],
+              let value = args["disable"] as? Bool else {
+            LogUtils.debug(message: "Invalid arguments provided for setTrackingDisabled")
+            return
+        }
+        
+        DispatchQueue.main.async {
+            Branch.setTrackingDisabled(value)
+        }
+    }
+    
+    private func getLastAttributedTouchData(call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any] else {
+            result(flutterError(message: "Invalid arguments provided for getLastAttributedTouchData", details: call.arguments))
+            return
+        }
+        
+        var response: [String: Any] = [:]
+        let attributionWindow = args["attributionWindow"] as? Int ?? 0
+        
+        Branch.getInstance().lastAttributedTouchData(withAttributionWindow: attributionWindow) { latd, error in
+            if error == nil {
+                var data: [String: Any] = [:]
+                if let attributedData = latd {
+                    data["latd"] = ["attibution_window": attributedData.attributionWindow,
+                                    "last_atributed_touch_data": attributedData.lastAttributedTouchJSON]
+                } else {
+                    data["latd"] = [:]
+                }
+                response["success"] = true
+                response["data"] = data
+            } else {
+                LogUtils.debug(message: "Failed to get lastAttributedTouchData: \(String(describing: error))")
+                response["success"] = false
+                if let err = error as NSError? {
+                    response["errorCode"] = String(err.code)
+                    response["errorMessage"] = err.localizedDescription
+                } else {
+                    response["errorCode"] = ""
+                    response["errorMessage"] = "Error message not returned by Branch SDK. See log for details."
+                }
+            }
+            DispatchQueue.main.async {
+                result(response)
+            }
+        }
+    }
+    
+    private func isUserIdentified(result: @escaping FlutterResult) {
+        DispatchQueue.main.async {
+            result(Branch.getInstance().isUserIdentified())
+        }
+    }
+    
+    private func setTimeout(call: FlutterMethodCall) {
+        // The Branch iOS SDK no longer directly exposes a method for `setTimeout`.
+        LogUtils.debug(message: "setTimeout called, but not applicable for iOS SDK version.")
+    }
+    
+    private func setConnectTimeout(call: FlutterMethodCall) {
+        guard let args = call.arguments as? [String: Any],
+              let connectTimeout = args["connectTimeout"] as? Int else {
+            LogUtils.debug(message: "Invalid arguments provided for setConnectTimeout")
+            return
+        }
+        DispatchQueue.main.async {
+            Branch.getInstance().setNetworkTimeout(TimeInterval(connectTimeout))
+        }
+    }
+    
+    private func setRetryCount(call: FlutterMethodCall) {
+        // The Branch iOS SDK no longer directly exposes a method for `setRetryCount`.
+        LogUtils.debug(message: "setRetryCount called, but not applicable for iOS SDK version.")
+    }
+    
+    private func setRetryInterval(call: FlutterMethodCall) {
+        guard let args = call.arguments as? [String: Any],
+              let retryInterval = args["retryInterval"] as? Int else {
+            LogUtils.debug(message: "Invalid arguments provided for setRetryInterval")
+            return
+        }
+        DispatchQueue.main.async {
+            Branch.getInstance().setRetryInterval(TimeInterval(retryInterval))
+        }
+    }
+    
+    private func setInstallReferrerTimeout(call: FlutterMethodCall) {
+        guard let args = call.arguments as? [String: Any],
+              let timeoutMs = args["timeoutMs"] as? Int else {
+            LogUtils.debug(message: "Invalid arguments provided for setInstallReferrerTimeout")
+            return
+        }
+        // Only log - not applicable for iOS SDK
+        LogUtils.debug(message: "setInstallReferrerTimeout called with value \(timeoutMs)ms, but not applicable for iOS SDK version.")
+    }
+    
+    private func getQRCode(call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let buoDict = args["buo"] as? [String: Any?],
+              let lpDict = args["lp"] as? [String: Any?],
+              let qrCodeDict = args["qrCodeSettings"] as? [String: Any?]
+        else {
+            result(flutterError(message: "Invalid arguments provided for getQRCode", details: call.arguments))
+            return
+        }
+        
+        // First, safely unwrap the optionals.
+        guard let buo = convertToBUO(dict: buoDict),
+              let lp = convertToLp(dict: lpDict) else {
+            result(flutterError(message: "Failed to create Branch Universal Object or Link Properties.", details: call.arguments))
+            return
+        }
+        
+
+        let qrCode = convertToQRCode(dict: qrCodeDict)
+        
+        var response: [String: Any] = [:]
+        
+        qrCode.getAsData(buo, linkProperties: lp, completion: { data, error in
+            if let imageData = data, error == nil {
+                response["success"] = true
+                response["result"] = FlutterStandardTypedData(bytes: imageData)
+            } else {
+                response["success"] = false
+                if let err = error as NSError? {
+                    response["errorCode"] = String(err.code)
+                    response["errorMessage"] = err.localizedDescription
+                } else {
+                    response["errorCode"] = ""
+                    response["errorMessage"] = "Error message not returned by Branch SDK. See log for details."
+                }
+            }
+            DispatchQueue.main.async {
+                result(response)
+            }
+        })
+    }
+    
+    private func shareWithLPLinkMetadata(call: FlutterMethodCall, result: @escaping FlutterResult) {
+        
+        guard let args = call.arguments as? [String: Any],
+              let buoDict = args["buo"] as? [String: Any?],
+              let lpDict = args["lp"] as? [String: Any?],
+              let messageText = args["messageText"] as? String
+        else {
+            result(flutterError(message: "Invalid arguments provided for shareWithLPLinkMetadata", details: call.arguments))
+            return
+        }
+        
+        guard let buo = convertToBUO(dict: buoDict),
+              let lp = convertToLp(dict: lpDict) else {
+            result(flutterError(message: "Failed to create BranchUniversalObject or BranchLinkProperties", details: call.arguments))
+            return
+        }
+        
+        var iconImage: UIImage?
+        if let iconData = args["iconData"] as? FlutterStandardTypedData {
+            iconImage = UIImage(data: iconData.data)
+        } else {
+            iconImage = Bundle.main.icon
+        }
+        
+        let bsl = BranchShareLink(universalObject: buo, linkProperties: lp)
+        if #available(iOS 13.0, *) {
+            bsl.addLPLinkMetadata(messageText, icon: iconImage)
+            guard let controller = getRootViewController() else {
+                result(flutterError(message: "Could not find root view controller to present share sheet for LPLinkMetadata"))
+                return
+            }
+            bsl.presentActivityViewController(from: controller, anchor: nil)
+            result(true)
+        } else {
+            showShareSheet(call: call, result: result)
+        }
+    }
+    
+    private func handleDeepLink(call: FlutterMethodCall) {
+        guard let args = call.arguments as? [String: Any],
+              let urlString = args["url"] as? String,
+              let url = URL(string: urlString) else {
+            LogUtils.debug(message: "Invalid arguments provided for handleDeepLink (URL missing or invalid)")
+            return
+        }
+        Branch.getInstance().handleDeepLink(withNewSession: url)
+    }
+    
+    private func addFacebookPartnerParameter(call: FlutterMethodCall) {
+        guard let args = call.arguments as? [String: Any],
+              let key = args["key"] as? String,
+              let value = args["value"] as? String else {
+            LogUtils.debug(message: "Invalid arguments provided for addFacebookPartnerParameter")
+            return
+        }
+        
+        if facebookParameters.keys.contains(key) && value.isEmpty {
+            facebookParameters.removeValue(forKey: key)
+        } else {
+            facebookParameters[key] = value
+        }
+        
+        DispatchQueue.main.async {
+            Branch.getInstance().addFacebookPartnerParameter(withName: key, value: value)
+        }
+    }
+    
+    private func addSnapPartnerParameter(call: FlutterMethodCall) {
+        guard let args = call.arguments as? [String: Any],
+              let key = args["key"] as? String,
+              let value = args["value"] as? String else {
+            LogUtils.debug(message: "Invalid arguments provided for addSnapPartnerParameter")
+            return
+        }
+        
+        if snapParameters.keys.contains(key) && value.isEmpty {
+            snapParameters.removeValue(forKey: key)
+        } else {
+            snapParameters[key] = value
+        }
+        
+        DispatchQueue.main.async {
+            Branch.getInstance().addSnapPartnerParameter(withName: key, value: value)
+        }
+    }
+    
+    private func setPreinstallCampaign(call: FlutterMethodCall) {
+        // This function is primarily relevant for Android.
+        LogUtils.debug(message: "setPreinstallCampaign called, but not directly applicable for iOS SDK version.")
+    }
+    
+    private func setPreinstallPartner(call: FlutterMethodCall) {
+        // This function is primarily relevant for Android.
+        LogUtils.debug(message: "setPreinstallPartner called, but not directly applicable for iOS SDK version.")
+    }
+    
+    private func setDMAParamsForEEA(call: FlutterMethodCall) {
+        guard let args = call.arguments as? [String: Any],
+              let eeaRegion = args["eeaRegion"] as? Bool,
+              let adPersonalizationConsent = args["adPersonalizationConsent"] as? Bool,
+              let adUserDataUsageConsent = args["adUserDataUsageConsent"] as? Bool
+        else {
+            LogUtils.debug(message: "Invalid arguments provided for setDMAParamsForEEA")
+            return
+        }
+        
+        DispatchQueue.main.async {
+            Branch.setDMAParamsForEEA(eeaRegion, adPersonalizationConsent: adPersonalizationConsent, adUserDataUsageConsent: adUserDataUsageConsent)
+        }
+    }
+    
+    private func setConsumerProtectionAttributionLevel(call: FlutterMethodCall) {
+        guard let args = call.arguments as? [String: Any],
+              let branchAttributionLevelString = args["branchAttributionLevel"] as? String
+        else {
+            LogUtils.debug(message: "Invalid arguments provided for setConsumerProtectionAttributionLevel")
+            return
+        }
+        
+        let branchAttributionLevel = BranchAttributionLevel(rawValue: branchAttributionLevelString)
+        
+        DispatchQueue.main.async {
+            Branch.getInstance().setConsumerProtectionAttributionLevel(branchAttributionLevel)
+        }
+    }
+    
+    
+    /*
+     https://developer.apple.com/documentation/apptrackingtransparency/attrackingmanager
+     
+     ATTrackingManager.AuthorizationStatus:
+     - authorized = 3
+     - denied = 2
+     - notDetermined = 0
+     - restricted = 1
+     */
+    
+    private func requestTrackingAuthorization(result: @escaping FlutterResult) {
+        if #available(iOS 14, *) {
+            ATTrackingManager.requestTrackingAuthorization { (status) in
+                Branch.getInstance().handleATTAuthorizationStatus(status.rawValue)
+                
+                DispatchQueue.main.async {
+                    result(Int(status.rawValue))
+                }
+            }
+        } else {
+            DispatchQueue.main.async {
+                result(Int(4)) // Return custom 'notSupported' code for iOS < 14
+            }
+        }
+    }
+    
+    private func getTrackingAuthorizationStatus(result: @escaping FlutterResult) {
+        if #available(iOS 14, *) {
+            DispatchQueue.main.async {
+                result(Int(ATTrackingManager.trackingAuthorizationStatus.rawValue))
+            }
+        } else {
+            DispatchQueue.main.async {
+                result(Int(4))  // Return custom 'notSupported' code for iOS < 14
+            }
+        }
+    }
+    
+    private func getAdvertisingIdentifier(result: @escaping FlutterResult) {
+        if #available(iOS 14, *) {
+            let status = ATTrackingManager.trackingAuthorizationStatus
+            if status == .authorized {
+                result(String(ASIdentifierManager.shared().advertisingIdentifier.uuidString))
+            } else {
+                result(String(""))  // return notSupported
+            }
+        } else {
+            DispatchQueue.main.async {
+                result(String(""))  // return notSupported
+            }
+        }
+    }
+    
+    /*
+     Sets a custom Meta Anon ID for the current user.
+     @param anonID The custom Meta Anon ID to be used by Branch.
+     */
+    private func setAnonID (call: FlutterMethodCall) {
+        guard let args = call.arguments as? [String: Any],
+              let anonId = args["anonId"] as? String else {
+            LogUtils.debug(message: "Invalid arguments provided for setAnonID")
+            return
+        }
+        LogUtils.debug(message: "setAnonID: \(anonId)")
+        DispatchQueue.main.async {
+            Branch.setAnonID(anonId)
+        }
+    }
+    /*
+     Set the SDK wait time for third party APIs (for fetching ODM info and Apple Attribution Token) to finish
+     This timeout should be > 0 and <= 10 seconds.
+     @param waitTime Number of seconds before third party API calls are considered timed out. Default is 0.5 seconds (500ms).
+     */
+    private func setSDKWaitTimeForThirdPartyAPIs (call: FlutterMethodCall) {
+        guard let args = call.arguments as? [String: Any],
+              let waitTime = args["waitTime"] as? Double else {
+            LogUtils.debug(message: "Invalid arguments provided for setSDKWaitTimeForThirdPartyAPIs")
+            return
+        }
+        LogUtils.debug(message: "setSDKWaitTimeForThirdPartyAPIs: \(String(describing: waitTime))")
+        DispatchQueue.main.async {
+            Branch.setSDKWaitTimeForThirdPartyAPIs(waitTime)
+        }
+    }
+    
+    // MARK: - Helper Methods
+    
+    /**
+     Maps Flutter log level string to Branch iOS SDK log level
+     */
+    private func mapLogLevel(_ logLevel: String) -> BranchLogLevel {
+        switch logLevel {
+        case "VERBOSE":
+            return BranchLogLevel.verbose
+        case "DEBUG":
+            return BranchLogLevel.debug
+        case "WARNING":
+            return BranchLogLevel.warning
+        case "ERROR":
+            return BranchLogLevel.error
+        default:
+            LogUtils.debug(message: "Unknown log level: \(logLevel), defaulting to verbose")
+            return BranchLogLevel.verbose
+        }
+    }
+    
+    internal func getDeferInitForPluginRuntimeFlag() -> Bool {
+      guard let path = Bundle.main.path(forResource: "branch", ofType: "json") else {
+        LogUtils.debug(message:"WARNING: branch.json file not found. Defaulting 'deferInitForPluginRuntime' to false.")
+        return false
+      }
+      
+      guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
+          LogUtils.debug(message:"WARNING: branch.json file is empty or could not be read. Defaulting 'deferInitForPluginRuntime' to false.")
+          return false
+      }
+
+      guard let jsonObject = try? JSONSerialization.jsonObject(with: data, options: []),
+            let jsonDict = jsonObject as? [String: Any] else {
+          LogUtils.debug(message:"WARNING: Error parsing branch.json. Defaulting 'deferInitForPluginRuntime' to false.")
+          return false
+      }
+
+      let deferValue = (jsonDict["deferInitForPluginRuntime"] as? Bool) ?? false
+      return deferValue
+    }
+}

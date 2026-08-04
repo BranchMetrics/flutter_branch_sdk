@@ -1,3 +1,202 @@
+## 9.3.3
+### 🔧 Native SDK Updates
+* Updated included Branch iOS SDK (ios-branch-sdk-spm / BranchSDK CocoaPods spec) to 3.14.2 - [iOS Version History](https://github.com/BranchMetrics/ios-branch-sdk-spm/releases)
+
+## 9.3.2
+### 🐛 Bug Fixes
+* Fix issue #502 - iOS scene lifecycle handlers returning `true` unconditionally, breaking URL handling for other plugins.
+
+## 9.3.1
+### 🐛 Bug Fixes
+* Fix issue #498 - Ensure that deep-link/session initialization functions correctly when applications use the UIScene lifecycle.
+
+## 9.3.0
+### 🔧 Native SDK Updates
+* Updated included Branch Android SDK to 5.21.0 - [Android Version History](https://github.com/BranchMetrics/android-branch-deep-linking-attribution/releases)
+
+### 🎉 Features
+* New Method: `setInstallReferrerTimeout` - Provides a setting to cancel the external Install Referrer string fetch. This is useful to optimize performance on Android by limiting the time the SDK waits for the Install Referrer. Only applicable on Android - iOS ignores this setting.
+* Added support for `installReferrerTimeout` configuration key in `branch-config.json`. This allows you to set the Install Referrer timeout during app initialization without code changes.
+  - Configuration example: `"installReferrerTimeout": 5000` (in milliseconds)
+  - See `README.md` for full documentation
+
+### 📖 Documentation
+* Updated `README.md` with comprehensive documentation for `setInstallReferrerTimeout` method
+* Added new section: "Set Install Referrer Timeout" with usage examples
+* Updated example configurations in `branch-config.json` section
+
+## 9.2.0
+### 🎉 Features
+* Added optional deferred SDK initialization for iOS, allowing apps to initialize the native Branch SDK later (e.g., after obtaining user consent).
+
+### 🐛 Bug Fixes
+* Corrected grammar in `README.md` and updated installation instructions.
+* Fixed JS interop method name for setting request metadata.
+
+## 9.1.1
+### 🐛 Bug Fixes
+* Fix issue #492 : enableLogging in branch-config.json breaks JSON key selection on iOS
+
+## 9.1.0
+### 🔧 Native SDK Updates
+* Updated included iOS SDK to 3.14.0 - [iOS Version History](https://github.com/BranchMetrics/ios-branch-deep-linking-attribution/releases)
+
+### 🎉 Features
+* Improved log output from `platformLogs` with more detailed information.
+
+### 🐛 Bug Fixes
+* **iOS:** Fixed double execution of `configureBranchSDK()` on iOS 13+ with Scene Delegate support. The method was being called from both `application(_:didFinishLaunchingWithOptions:)` and `scene(_:willConnectTo:options:)`, causing duplicate logging callback registration and other redundant SDK initialization. Added idempotency guard with `isSdkConfigured` flag to prevent re-execution.
+
+## 9.0.0
+### ⚠️ BREAKING CHANGES
+- **Minimum Flutter version**: 3.38.0 (was 3.19.0)
+- **Minimum Dart SDK**: 3.10.0 (was 3.3.0)
+- **Minimum iOS version** : 13
+
+### 🎉 Features
+**iOS UISceneDelegate Support (iOS 13+)** [Flutter UISceneDelegate adoption](https://docs.flutter.dev/release/breaking-changes/uiscenedelegate)
+- Added full support for iOS 13+ UISceneDelegate lifecycle
+- Maintains full backward compatibility with UIApplicationDelegate for apps not using scenes
+
+## 8.11.0
+### 🎉 Features
+**New Platform Logging Stream**
+- Added `FlutterBranchSdk.platformLogs` stream to receive Branch SDK log messages in real-time
+- Enable logging via `branch-config.json` (`enableLogging` and `logLevel` keys) or programmatically through `FlutterBranchSdk.init()`
+- Supports log levels: `VERBOSE`, `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `NONE`
+- Example usage:
+  ```dart
+  FlutterBranchSdk.platformLogs.listen((logMessage) {
+    debugPrint('Branch Log: $logMessage');
+  });
+  ```
+
+## 8.10.0
+### 🎉 Features
+**Introduced platform-specific API URL configuration.** This allows developers to define different API endpoints for Android and iOS in `branch-config.json`.
+- Added key `apiUrlAndroid` in `branch-config.json` to configure the API URL for the Android platform.
+- Added key `apiUrlIOS` in `branch-config.json` to configure the API URL for the iOS platform.
+
+### 🗑️ Removals
+- ⚠️ The generic `apiUrl` key has been removed from `branch-config.json`. Please update your configuration to use the new platform-specific keys (`apiUrlAndroid` and `apiUrlIOS`).
+
+## 8.9.0+1
+### 🎉 Fixes
+* Updated `README.MD` with correct configuration for `branch-config.json`. 
+
+## 8.9.0
+### 🎉 Features & Fixes
+* **Android:** Resolved build warnings (`unchecked or unsafe operations, deprecated api`) for a cleaner build process.
+* **Android:** Updated plugin configuration to ensure compatibility with Android Gradle Plugin (AGP) 8.6.x (16KB Page Size).
+* **Android:** ⚠️ Updated the `showShareSheet` function, which now requires a minimum of API level 22 (Android 5.1) to work correctly.
+* **iOS:** Improved plugin stability by adding consistency checks to safely handle all incoming data from Flutter and prevent crashes.
+* **iOS:** Modernized native code to ensure compatibility with recent APIs.
+* Fixed Flutter linter warnings to improve code quality and maintainability.
+
+### 🗑️ Removals
+* The deprecated method `FlutterBranchSdk.disableTracking()` has been removed.
+
+## 8.8.0
+### 🎉 Features
+
+* Configuration through `branch-config.json` file. 
+	- Some settings can be configured by adding an `assets/branch-config.json` file to your project. 
+	- This eliminates the need for manual modifications to native files (`AndroidManifest.xml` and `Info.plist`). 
+	- Toggle between your test and live keys within the `branch-config.json` file, streamlining the development and release process.
+	- The `branch-config.json` file and its keys are optional. The plugin will gracefully handle its absence, allowing for programmatic setup or backward compatibility with the manual native setup. If the file is present but a key is missing, the plugin will use default values where applicable.
+	- Read the **README.md** for full instructions for JSON-based configuration.
+
+## 8.7.1
+### 🐛 Bug Fixes
+* Fix issue #461 : iOS Build Failure using CocoaPods
+
+## 8.7.0
+### 🔧 Native SDK Updates
+* Updated included iOS SDK to 3.13.0 - [iOS Version History](https://github.com/BranchMetrics/ios-branch-deep-linking-attribution/releases)
+* Updated included Branch Android SDK to 5.20.0 - [Android Version History](https://github.com/BranchMetrics/android-branch-deep-linking-attribution/releases)
+
+### 🎉 Features
+* New Methods:
+    - `setAnonID` - Sets a custom Meta Anon ID for the current user.
+    - `setSDKWaitTimeForThirdPartyAPIs` - Set the SDK wait time for third party APIs (for fetching ODM info and Apple Attribution Token) to finish
+
+## 8.6.0
+### 🔧 Native SDK Updates
+* Updated included Branch Android SDK to 5.19.0 - [Android Version History](https://github.com/BranchMetrics/android-branch-deep-linking-attribution/releases)
+
+### 🐛 Bug Fixes
+* Fix issue #442: [Web] getShortUrl() Future never completes on alias conflict (err arrives as JS Error, not String)
+
+### 🎉 Features
+* Reviewing the documentation for the `FlutterBranchSdk.validateSDKIntegration()` method
+* Improved error handling in Flutter Web
+
+## 8.5.0
+### 🔧 Native SDK Updates
+* Updated included iOS SDK to 3.12.0 - [iOS Version History](https://github.com/BranchMetrics/ios-branch-deep-linking-attribution/releases)
+* Updated included Branch Android SDK to 5.18.0 - [Android Version History](https://github.com/BranchMetrics/android-branch-deep-linking-attribution/releases)
+
+## 8.4.1
+### 🐛 Bug Fixes
+* Fix issue #423: setRequestMetadata doesn't populate the key value pairs in the event request as expected
+
+## 8.4.0
+### 🔧 Native SDK Updates
+* Updated included iOS SDK to 3.9.0 - [iOS Version History](https://github.com/BranchMetrics/ios-branch-deep-linking-attribution/releases)
+
+## 8.3.2
+### ⚠️ BREAKING CHANGE
+* Minimum required Dart SDK version 3.3.0 (Flutter 3.19.0 - 15/02/2024)
+
+### 🐛 Bug Fixes
+* Fix issue #410: "reply already sent and a possible ANR". Tks @Junglee-Faisal
+
+### 🎉 Features
+* Migrated Gradle to declarative plugins block
+
+## 8.3.1
+### ⚠️ BREAKING CHANGE
+* Minimum required Dart SDK version 3.3.0 (Flutter 3.19.0 - 15/02/2024)
+
+### 🎉 Features
+* Revised documentation including section to change **Flutter Deep link flag**
+* New option in INFO.PLIST (`branch_disable_nativelink`) that allows disable NativeLink™ Deferred Deep Linking
+
+## 8.3.0
+### ⚠️ BREAKING CHANGE
+* Minimum required Dart SDK version 3.3.0 (Flutter 3.19.0 - 15/02/2024)
+
+### 🎉 Features
+* New Methods:
+    - `setConsumerProtectionAttributionLevel` - Sets the consumer protection attribution level. Read Branch documentation for details:
+    	* [Introducing Consumer Protection Preference Levels](https://help.branch.io/using-branch/changelog/introducing-consumer-protection-preference-levels)
+    	* [Consumer Protection Preferences](https://help.branch.io/developers-hub/docs/consumer-protection-preferences)
+
+#### Deprecated / Removed
+* `FlutterBranchSdk.disableTracking()`. Use `FlutterBranchSdk.setConsumerProtectionAttributionLevel()`.
+* Removed `initSession` method.
+
+### Native SDK Updates
+### 🔧 Native SDK Updates
+* Updated included iOS SDK to 3.7.0 - [iOS Version History](https://github.com/BranchMetrics/ios-branch-deep-linking-attribution/releases)
+* Updated included Branch Android SDK to 5.15.0 - [Android Version History](https://github.com/BranchMetrics/android-branch-deep-linking-attribution/releases)
+
+## 8.2.0
+### ⚠️ BREAKING CHANGE
+* Minimum required Dart SDK version 3.3.0 (Flutter 3.19.0 - 15/02/2024)
+
+### 🎉 Features
+* Issue #361: Migrate to dart:js_interop to support Webassamebly. Thanks @hnvn
+
+## 8.1.1
+### 🐛 Bug Fixes
+* Fix issue #368: "-118, Warning. Session initialization already happened" triggered in the listSession callback
+
+## 8.1.0
+### 🔧 Native SDK Updates
+* Updated included iOS SDK to 3.6.0 - [iOS Version History](https://github.com/BranchMetrics/ios-branch-deep-linking-attribution/releases)
+* Updated included Branch Android SDK to 5.12.2 - [Android Version History](https://github.com/BranchMetrics/android-branch-deep-linking-attribution/releases)
+
 ## 8.0.4
 ### ⚠️ BREAKING CHANGE
 This is a major release which contains breaking API changes.
@@ -62,7 +261,6 @@ This is a major release which contains breaking API changes.
 ### 🔧 Native SDK Updates
 
 * Updated included iOS SDK to 3.4.3 - [iOS Version History](https://github.com/BranchMetrics/ios-branch-deep-linking-attribution/releases)
-
 * Updated included Branch Android SDK to 5.12.0 - [Android Version History](https://github.com/BranchMetrics/android-branch-deep-linking-attribution/releases)
 
 

@@ -2,6 +2,30 @@ include: package:flutter_lints/flutter.yaml
 
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options
+
+formatter:
+  page_width: 123
+
 linter:
   rules:
     constant_identifier_names: false
+    public_member_api_docs: false
+    prefer_single_quotes: true
+    always_declare_return_types : true
+    prefer_const_constructors : true
+    prefer_final_locals : true
+    prefer_final_in_for_each: true
+    avoid_print: true
+    prefer_const_declarations : true
+    avoid_unnecessary_containers : true
+    unnecessary_const : true
+    no_literal_bool_comparisons : true
+    unnecessary_getters_setters : true
+    unnecessary_breaks : true
+    unnecessary_raw_strings : true
+    unnecessary_underscores : true
+    use_named_constants : true
+    prefer_void_to_null : true
+    avoid_void_async : true
+
+
